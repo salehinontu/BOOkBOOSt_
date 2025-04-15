@@ -1,0 +1,298 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#define MAX 100
+
+// Book structure
+typedef struct Book {
+    int id;
+    char title[100];
+    char author[100];
+    char genre[50];
+    struct Book *left, *right;
+} Book;
+
+// Issued book structure with issue date
+typedef struct {
+    Book *book;
+    time_t issueDate;
+} IssuedBook;
+
+// Stack for issued books
+typedef struct Stack {
+    IssuedBook books[MAX];
+    int top;
+} Stack;
+
+Book *root = NULL;
+Stack issuedStack;
+
+// ---------------- BST functions ----------------
+Book* createBook(int id, char *title, char *author, char *genre) {
+    Book *newBook = (Book*) malloc(sizeof(Book));
+    newBook->id = id;
+    strcpy(newBook->title, title);
+    strcpy(newBook->author, author);
+    strcpy(newBook->genre, genre);
+    newBook->left = newBook->right = NULL;
+    return newBook;
+}
+
+Book* insertBook(Book *root, int id, char *title, char *author, char *genre) {
+    if (root == NULL)
+        return createBook(id, title, author, genre);
+    if (id < root->id)
+        root->left = insertBook(root->left, id, title, author, genre);
+    else if (id > root->id)
+        root->right = insertBook(root->right, id, title, author, genre);
+    return root;
+}
+
+void inOrder(Book *root) {
+    if (root != NULL) {
+        inOrder(root->left);
+        printf("ID: %d | Title: %s | Author: %s | Genre: %s\n", root->id, root->title, root->author, root->genre);
+        inOrder(root->right);
+    }
+}
+
+Book* searchBook(Book *root, int id) {
+    if (root == NULL || root->id == id)
+        return root;
+    if (id < root->id)
+        return searchBook(root->left, id);
+    return searchBook(root->right, id);
+}
+
+// ---------------- Stack ----------------
+void initStack() {
+    issuedStack.top = -1;
+}
+
+void push(Book *book) {
+    if (issuedStack.top < MAX - 1) {
+        issuedStack.top++;
+        issuedStack.books[issuedStack.top].book = book;
+        issuedStack.books[issuedStack.top].issueDate = time(NULL);
+    }
+}
+
+void viewIssuedBooks() {
+    if (issuedStack.top == -1) {
+        printf("📭 No books issued yet.\n");
+        return;
+    }
+    printf("\n===== 📖 Issued Books =====\n");
+    for (int i = issuedStack.top; i >= 0; i--) {
+        IssuedBook ib = issuedStack.books[i];
+        struct tm *tm_info = localtime(&ib.issueDate);
+        char buffer[30];
+        strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", tm_info);
+        printf("ID: %d | Title: %s | Issued on: %s\n", ib.book->id, ib.book->title, buffer);
+    }
+}
+
+// ---------------- Recommendation ----------------
+void recommendBooksInGenre(Book *root, char *genre) {
+    if (root == NULL) return;
+
+    recommendBooksInGenre(root->left, genre);
+    if (strcmp(root->genre, genre) == 0) {
+        printf("- %s by %s [ID: %d]\n", root->title, root->author, root->id);
+    }
+    recommendBooksInGenre(root->right, genre);
+}
+
+// ---------------- Admin & User Actions ----------------
+void saveBooksToFile(Book *root, FILE *fp) {
+    if (root == NULL) return;
+    saveBooksToFile(root->left, fp);
+    fprintf(fp, "%d,%s,%s,%s\n", root->id, root->title, root->author, root->genre);
+    saveBooksToFile(root->right, fp);
+}
+
+void loadBooksFromFile() {
+    FILE *fp = fopen("books.txt", "r");
+    if (fp == NULL) return;
+
+    int id;
+    char title[100], author[100], genre[50];
+    while (fscanf(fp, "%d,%99[^,],%99[^,],%49[^\n]\n", &id, title, author, genre) == 4) {
+        root = insertBook(root, id, title, author, genre);
+    }
+    fclose(fp);
+}
+
+void addBookManually() {
+    int id;
+    char title[100], author[100], genre[50];
+    printf("Enter Book ID: ");
+    scanf("%d", &id); getchar();
+    printf("Enter Title: "); fgets(title, sizeof(title), stdin); title[strcspn(title, "\n")] = 0;
+    printf("Enter Author: "); fgets(author, sizeof(author), stdin); author[strcspn(author, "\n")] = 0;
+    printf("Enter Genre: "); fgets(genre, sizeof(genre), stdin); genre[strcspn(genre, "\n")] = 0;
+    root = insertBook(root, id, title, author, genre);
+    printf("\n✅ Book added successfully!\n");
+
+    FILE *fp = fopen("books.txt", "w");
+    if (fp != NULL) {
+        saveBooksToFile(root, fp);
+        fclose(fp);
+    }
+}
+
+void issueBook() {
+    int id;
+    printf("Enter Book ID to issue: ");
+    scanf("%d", &id);
+    Book *b = searchBook(root, id);
+    if (b) {
+        printf("✅ Book issued: %s [%s]\n", b->title, b->genre);
+        push(b);
+        printf("\n📚 Other books in genre '%s':\n", b->genre);
+        recommendBooksInGenre(root, b->genre);
+    } else {
+        printf("❌ Book not found.\n");
+    }
+}
+
+void returnBook() {
+    if (issuedStack.top >= 0) {
+        IssuedBook issued = issuedStack.books[issuedStack.top--];
+        time_t current = time(NULL);
+        double diff = difftime(current, issued.issueDate);
+        int days = (int)(diff / (60 * 60 * 24));
+
+        printf("🔁 Returned Book: %s\n", issued.book->title);
+        printf("⏱ Days since issued: %d day(s)\n", days);
+
+        if (days > 3) {
+            int fine = (days - 3) * 10;
+            printf("⚠️ Fine: ₹%d (₹10 x %d extra days)\n", fine, days - 3);
+        } else {
+            printf("✅ Returned on time. No fine.\n");
+        }
+    } else {
+        printf("❌ No issued book to return.\n");
+    }
+}
+
+// ---------------- Sample Books ----------------
+void loadSampleBooks() {
+    root = insertBook(root, 101, "The Hobbit", "J.R.R. Tolkien", "Fantasy");
+    root = insertBook(root, 102, "1984", "George Orwell", "Sci-Fi");
+    root = insertBook(root, 103, "The Da Vinci Code", "Dan Brown", "Mystery");
+    root = insertBook(root, 104, "Pride and Prejudice", "Jane Austen", "Romance");
+    root = insertBook(root, 105, "Sapiens", "Yuval Noah Harari", "History");
+    root = insertBook(root, 106, "The Martian", "Andy Weir", "Sci-Fi");
+    root = insertBook(root, 107, "Sherlock Holmes", "Arthur Conan Doyle", "Mystery");
+    root = insertBook(root, 108, "Jane Eyre", "Charlotte Bronte", "Drama");
+    root = insertBook(root, 109, "Steve Jobs", "Walter Isaacson", "Biography");
+
+    FILE *fp = fopen("books.txt", "w");
+    if (fp != NULL) {
+        saveBooksToFile(root, fp);
+        fclose(fp);
+    }
+}
+
+// ---------------- Panels ----------------
+void adminPanel() {
+    int ch;
+    while (1) {
+        printf("\n===== 🛠 Admin Panel =====\n");
+        printf("1. Add Book\n");
+        printf("2. Show All Books\n");
+        printf("3. View Issued Books\n");
+        printf("4. Back to Main Menu\n");
+        printf("Enter choice: ");
+        scanf("%d", &ch);
+
+        switch (ch) {
+            case 1: addBookManually(); break;
+            case 2: inOrder(root); break;
+            case 3: viewIssuedBooks(); break;
+            case 4: return;
+            default: printf("❌ Invalid choice!\n");
+        }
+    }
+}
+
+void userPanel() {
+    int ch;
+    while (1) {
+        printf("\n===== 👤 User Panel =====\n");
+        printf("1. Show All Books\n");
+        printf("2. Issue Book\n");
+        printf("3. Return Book\n");
+        printf("4. View Issued Books\n");
+        printf("5. Back to Main Menu\n");
+        printf("Enter choice: ");
+        scanf("%d", &ch);
+
+        switch (ch) {
+            case 1: inOrder(root); break;
+            case 2: issueBook(); break;
+            case 3: returnBook(); break;
+            case 4: viewIssuedBooks(); break;
+            case 5: return;
+            default: printf("❌ Invalid choice!\n");
+        }
+    }
+}
+
+// ---------------- Login ----------------
+int adminLogin() {
+    char username[20], password[20];
+    printf("Admin Username: ");
+    scanf("%s", username);
+    printf("Admin Password: ");
+    scanf("%s", password);
+
+    if (strcmp(username, "admin") == 0 && strcmp(password, "admin123") == 0)
+        return 1;
+    else
+        return 0;
+}
+
+// ---------------- Main ----------------
+int main() {
+    initStack();
+    loadBooksFromFile();
+    if (root == NULL) {
+        loadSampleBooks();
+    }
+
+    int choice;
+    while (1) {
+        printf("\n===== 📚 Library System =====\n");
+        printf("1. Admin Login\n");
+        printf("2. User Panel\n");
+        printf("3. Exit\n");
+        printf("Enter your choice: ");
+        scanf("%d", &choice);
+
+        switch (choice) {
+            case 1:
+                if (adminLogin()) {
+                    printf("✅ Admin login successful.\n");
+                    adminPanel();
+                } else {
+                    printf("❌ Incorrect credentials.\n");
+                }
+                break;
+            case 2:
+                userPanel();
+                break;
+            case 3:
+                printf("👋 Exiting...\n");
+                exit(0);
+            default:
+                printf("❌ Invalid choice!\n");
+        }
+    }
+
+    return 0;
+}
